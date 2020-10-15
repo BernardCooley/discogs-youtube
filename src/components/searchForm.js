@@ -5,58 +5,91 @@ import Discogs from '../api/index';
 
 const Styles = styled.div`
     .searchFormContainer {
-        width: 90%;
+        width: 100%;
         height: auto;
         border-radius: 10px;
-        margin: 50px auto;
+        display: flex;
 
-        .formContainer{
+        .resultsContainer {
+            height: 400px;
             display: flex;
-            flex-direction: column;
-            width: 50%;
-            margin: 30px auto;
+            width: 60%;
+            padding: 20px;
 
-            .fieldContainer {
+            .listingsContainer {
+
+
+                .artistAndTitle {
+                    font-size: 24px;
+                }
+
+                .resultsList {
+                    list-style: none
+                }
+            }
+        }
+
+        .formOuterContainer {
+            width: 40%;
+            padding: 20px;
+
+            .formContainer{
+                height: 100%;
                 display: flex;
                 flex-direction: column;
-                margin-bottom: 16px;
-            }
-
-            .inputField {
-                margin-top: 5px;
-                height: 30px;
-                border-radius: 5px;
-                border: 1px solid lightgray;
-                padding-left: 10px;
-                font-size: 16px;
-            }
-
-            .searchButton {
-                font-size: 24px;
-                padding: 10px;
-                margin-top: 10px;
-            }
-
-            .yearRangeContainer {
-                margin: 0;
-                display: flex;
                 width: 100%;
-                justify-content: space-between;
+
+                .fieldContainer {
+                    display: flex;
+                    flex-direction: column;
+                    margin-bottom: 16px;
+                }
+
+                .inputField {
+                    margin-top: 5px;
+                    height: 30px;
+                    border-radius: 5px;
+                    border: 1px solid lightgray;
+                    padding-left: 10px;
+                    font-size: 16px;
+                }
+
+                .searchButton {
+                    font-size: 24px;
+                    padding: 10px;
+                    margin-top: 10px;
+                }
+
+                .yearRangeContainer {
+                    margin: 0;
+                    display: flex;
+                    width: 100%;
+                    justify-content: space-between;
+                }
             }
+
         }
     }
 `;
 
 const SearchForm = () => {
-    const db = new Discogs.Client().database();
-    const mp = new Discogs.Client().marketplace();
-    const user = new Discogs.Client().user();
+    const agent = 'discogs-youtube/0.1.0';
+    const token = {
+        userToken: 'xPEpFIUQvWdCzKyvDqRpjMlYaPMlJCBcjtmtyrBQ'
+    }
+    const db = new Discogs.Client(agent, token).database();
+    const mp = new Discogs.Client(agent, token).marketplace();
+    const user = new Discogs.Client(agent, token).user();
+
     const [listings, setListings] = useState([]);
     const [formData, setFormData] = useState({});
-    const [pages, setPages] = useState(0);
+    const [page, setPage] = useState(0);
+    const [releases, setReleases] = useState([]);
+    const [currentReleaseIndex, setCurrentReleaseIndex] = useState(0);
+    const [currentRelease, setCurrentRelease] = useState();
 
     const params = {
-        page: 1,
+        page: page,
         per_page: 100
     }
 
@@ -75,94 +108,126 @@ const SearchForm = () => {
 
     const { register, handleSubmit, errors } = useForm({
         defaultValues: {
-            pageNumber: 1,
-            yearFrom: 2010,
+            seller: 'skippedabeat',
+            genre: 'Techno',
+            yearFrom: 2016,
             yearTo: 2020
         }
     });
 
     useEffect(() => {
-        if(listings.length > 0) {
+        if (listings.length > 0) {
             console.log(listings);
-            console.log('----------------------------------------');
-            filterListings();
+            getReleases();
         }
     }, [listings]);
 
     useEffect(() => {
-        if (pages > 0) {
-            getListings();
-        }
-    }, [pages]);
+        // console.log(releases);
+        
+        setCurrentRelease(releases[currentReleaseIndex]);
+    }, [releases]);
+
+    useEffect(() => {
+        // console.log(currentRelease);
+        getCurrentTracklist();
+    }, [currentRelease]);
 
     const search = data => {
         setFormData({
             seller: data.seller,
-            pageNumber: data.pageNumber,
+            genre: data.genre,
             yearFrom: data.yearFrom,
             yearTo: data.yearTo
         });
 
-        user.getInventory('skippedabeat', params, function (err, data) {
-            setPages(data.pagination.pages);
-        });
-
-        
-
-        // urls.forEach(url => {
-        //     window.open(url, '_blank');
-        // });
+        getListings(data.seller);
     }
 
-    const getListings = async () => {
-            await Promise.all(
-                Array(pages).fill().map(async (id, index) => {
-                    params.page = index + 1;
+    const getListings = seller => {
+        const params = {
+            page: page + 1,
+            per_page: 100,
+            status: 'For Sale'
+        }
 
-                    await user.getInventory('skippedabeat', params, function (err, data) {
-                        if(data) {
-                            setListings(listings => [...listings, ...data.listings]);
-                        }
-                    });
-                })
-            )
-    }
+        setPage(page + 1);
 
-    const filterListings = () => {
-        const filteredListings = listings.filter(listing => listing.release.format.includes('LP'));
-
-        // console.log(filteredListings);
-
-        db.getRelease(filteredListings[0].release.id, function (err, data) {
-            console.log(data.styles);
-            if (data.styles.includes('Techno')) {
-                console.log('yes');
+        user.getInventory(seller, params, function (err, data) {
+            if (data) {
+                setListings(data.listings);
             }
         });
-
-        // filteredListings.forEach(listing => {
-        //     // console.log(listing.release.id);
-
-        //     db.getRelease(filteredListings[0].release.id, function (err, data) {
-        //         console.log(data);
-        //     });
-        // });
     }
 
-    return (
-        <Styles>
-            <div className='searchFormContainer'>
+    const getReleases = async () => {
+        const filteredListings = listings.filter(listing => matchCriteria(listing));
+
+        await Promise.all(
+            filteredListings.map(async (listing, index) => {
+                if (index === 25) {
+                    return;
+                }
+                await db.getRelease(listing.release.id).then(release => {
+                    if(release.styles.includes(formData.genre)) {
+                        setReleases(releases => [...releases, release]);
+                    }
+                })
+            })
+        )
+    }
+
+    const matchCriteria = listing => {
+        return (listing.release.format.includes('LP') || listing.release.format.includes('12')) && Number(listing.release.year) >= formData.yearFrom && Number(listing.release.year) <= formData.yearTo && listing.ships_from === 'United Kingdom';
+    }
+
+    const chooseRelease = backForward => {
+        if(backForward === 'back') {
+            if(currentReleaseIndex > 1) {
+                setCurrentRelease(releases[currentReleaseIndex - 1]);
+                setCurrentReleaseIndex(currentReleaseIndex - 1);
+            }
+        }else if (backForward === 'forward') {
+            if(currentReleaseIndex < releases.length - 1) {
+                setCurrentRelease(releases[currentReleaseIndex + 1]);
+                setCurrentReleaseIndex(currentReleaseIndex + 1);
+            }else {
+                getListings(formData.seller);
+            }
+        }
+
+
+        setCurrentRelease(releases[currentReleaseIndex]);
+    }
+
+    const getCurrentTracklist = () => {
+        const tracks = [];
+
+        if(currentRelease) {
+            currentRelease.tracklist.forEach(track => {
+                tracks.push({
+                    artist: currentRelease.artists_sort,
+                    title: track.title
+                })
+            })
+        }
+
+        return tracks;
+    }
+
+    const Form = () => {
+        return (
+            <div className='formOuterContainer'>
                 <form onSubmit={handleSubmit(search)} className="formContainer" noValidate>
                     <div className='fieldContainer'>
                         <label>Seller</label>
-                        <input className={`inputField ${errors.seller ? 'errorBorder' : ''}`} type="text"  name="seller" ref={register()}></input>
+                        <input className={`inputField ${errors.seller ? 'errorBorder' : ''}`} type="text" name="seller" ref={register()}></input>
                     </div>
 
                     <div className='fieldContainer'>
-                        <label>Page number</label>
-                        <input className={`inputField ${errors.pageNumber ? 'errorBorder' : ''}`} type="number" name="pageNumber" ref={register()}></input>
+                        <label>Genre</label>
+                        <input className={`inputField ${errors.genre ? 'errorBorder' : ''}`} type="text" name="genre" ref={register()}></input>
                     </div>
-
 
                     <div className='yearRangeContainer'>
                         <div className='fieldContainer'>
@@ -178,6 +243,40 @@ const SearchForm = () => {
 
                     <button className='searchButton' type="submit">Search</button>
                 </form>
+            </div>
+        )
+    }
+
+    const SearchedListings = () => {
+        return (
+            <div className='resultsContainer'>
+                {releases.length > 0 ?
+                    <div className='listingsContainer'>
+                        <div className='releaseArtistAndTitleLabel'>Release</div>
+                        <div className='artistAndTitle'>
+                            {
+                                releases[currentReleaseIndex].artists_sort} - {releases[currentReleaseIndex].title
+                            }
+                        </div>
+                        <div className='tracksLabel'>Tracks</div>
+                        <div className='tracks'>
+                            {currentRelease ? getCurrentTracklist().map((track, index) => (
+                                <div key={index} className=''>
+                                    {track.artist} - {track.title}
+                                </div>
+                            )): null}
+                        </div>
+                    </div> : null
+                }
+            </div>
+        )
+    }
+
+    return (
+        <Styles>
+            <div className='searchFormContainer'>
+                <Form />
+                <SearchedListings />
             </div>
         </Styles>
     )
